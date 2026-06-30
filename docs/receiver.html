@@ -86,7 +86,7 @@ const API = "https://api.github.com/repos/carterLeE114/led-msg-board";
 const H = {"Authorization":"Bearer "+TK,"Accept":"application/vnd.github+json","Content-Type":"application/json"};
 
 const $=id=>document.getElementById(id);
-let port=null, writer=null, pollTimer=null;
+let port=null, writer=null, pollTimer=null, readCancel=null;
 const POLL_MS=3000, SENT=JSON.parse(localStorage.getItem('led-sent')||'[]');
 const hasSerial = typeof navigator !== 'undefined' && !!navigator.serial;
 
@@ -101,10 +101,19 @@ async function connect(){
   try{
     port=await navigator.serial.requestPort();
     await port.open({baudRate:115200});
+
+    // ESP32 will reset on DTR — wait for boot
+    $('nowMsg').textContent='ESP32 booting...';
+    $('nowBy').textContent='Please wait 3 seconds';
+    await new Promise(r=>setTimeout(r,3000));
+    log('ESP32 boot complete');
+
     const textEncoder=new TextEncoderStream();
-    const writable=textEncoder.writable;
     textEncoder.readable.pipeTo(port.writable);
-    writer=writable.getWriter();
+    writer=textEncoder.writable.getWriter();
+
+    // Read ESP32 serial output (debug logs)
+    startReading();
 
     $('connBtn').textContent='Disconnect';
     $('connBtn').className='btn off';
@@ -122,6 +131,7 @@ async function connect(){
 
 async function disconnect(){
   clearInterval(pollTimer);
+  if(readCancel){try{readCancel.cancel()}catch(e){}readCancel=null}
   try{writer.close();writer.releaseLock()}catch(e){}
   try{await port.close()}catch(e){}
   port=null;writer=null;
@@ -131,6 +141,32 @@ async function disconnect(){
   $('nowMsg').textContent='Disconnected';
   $('nowBy').textContent='';
   log('Disconnected');
+}
+
+async function startReading(){
+  if(!port||!port.readable)return;
+  try{
+    const r=port.readable.getReader();
+    readCancel=r;
+    const decoder=new TextDecoder();
+    let buf='';
+    while(true){
+      const{value,done}=await r.read();
+      if(done)break;
+      buf+=decoder.decode(value,{stream:true});
+      let idx;
+      while((idx=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,idx).trim();
+        buf=buf.slice(idx+1);
+        if(line)log('[esp32] '+line);
+      }
+    }
+  }catch(e){
+    if(e.message&&e.message.includes('cancel'))return;
+    log('Read error: '+e.message,'err');
+  }finally{
+    readCancel=null;
+  }
 }
 
 // ===== GitHub Poll =====
