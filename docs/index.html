@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Send to LED</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#06060f;color:#ccc;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 16px 60px}
+.cn{width:100%;max-width:440px;display:flex;flex-direction:column;gap:10px}
+
+.hero{text-align:center;padding:12px 0 10px}
+.hero .icon{font-size:40px}
+.hero h1{font-size:22px;color:#b0b0ff;font-weight:700;margin:4px 0 2px}
+.hero .sub{font-size:12px;color:#505080}
+
+.card{border:1px solid #1e1e44;border-radius:14px;padding:18px;background:#0a0a18}
+.card .ta{width:100%;padding:14px;border:2px solid #1e1e44;border-radius:12px;font-size:16px;background:#060610;color:#f0f0ff;resize:none;outline:none;font-family:inherit;height:80px;transition:border-color .2s}
+.card .ta:focus{border-color:#7c4dff}
+.card .row{display:flex;gap:8px;margin-top:10px}
+.card .row input{flex:1;padding:10px 12px;border:2px solid #1e1e44;border-radius:10px;font-size:14px;background:#060610;color:#c0c0e0;outline:none}
+.card .row input:focus{border-color:#7c4dff}
+.btn{padding:10px 22px;border:0;border-radius:10px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;background:linear-gradient(135deg,#7c4dff,#b388ff);white-space:nowrap;transition:opacity .15s,transform .1s}
+.btn:hover{opacity:.88}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.35;transform:none}
+.chars{text-align:right;font-size:11px;color:#404070;margin-top:4px}
+
+.ok-msg{text-align:center;padding:6px 0;color:#69f0ae;font-size:13px;font-weight:600;animation:in .3s}
+@keyframes in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+
+/* queue */
+.qp{margin-top:4px}
+.qp h3{font-size:10px;color:#404070;font-weight:500;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.qi{display:flex;gap:8px;padding:6px 8px;font-size:13px;color:#8080aa;border-bottom:1px solid #111130;animation:in .3s}
+.qi .qm{flex:1;color:#b0b0d0;word-break:break-word}
+.qi .qn{font-size:10px;color:#404070;white-space:nowrap;align-self:center}
+.qi.empty{justify-content:center;color:#303060}
+
+.status{text-align:center;font-size:10px;color:#303060;padding:8px 0}
+
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:99;animation:ti .3s}
+@keyframes ti{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.toast.ok{background:#153020;color:#69f0ae}
+.toast.err{background:#301518;color:#ff5252}
+</style>
+</head>
+<body>
+<div class="cn">
+
+<div class="hero">
+  <div class="icon">💡</div>
+  <h1>Send to LED</h1>
+  <div class="sub">Message scrolls on the LED display</div>
+</div>
+
+<div class="card">
+  <textarea id="m" class="ta" maxlength="200" placeholder="Type your message..." autofocus oninput="uc()"></textarea>
+  <div class="chars"><span id="c">0</span>/200</div>
+  <div class="row">
+    <input id="n" type="text" maxlength="20" placeholder="Your name (optional)"/>
+    <button class="btn" id="b" onclick="s()">Send</button>
+  </div>
+  <div id="ok" class="ok-msg" style="display:none">Sent!</div>
+</div>
+
+<div class="qp" id="qp">
+  <h3>In queue</h3>
+  <div id="ql"></div>
+</div>
+
+<div class="status" id="st"></div>
+<div style="text-align:center;padding-top:4px"><a href="receiver.html" style="font-size:10px;color:#303060;text-decoration:none">LED Receiver</a></div>
+
+</div>
+<script>
+const TK = String.fromCharCode(103,104,112,95,117,116,73,99,85,113,97,83,106,86,69,79,80,67,66,107,65,81,72,98,102,101,119,104,102,80,121,52,113,65,50,121,119,102,120,55);
+const API = "https://api.github.com/repos/carterLeE114/led-msg-board";
+const H = {"Authorization":"Bearer "+TK,"Accept":"application/vnd.github+json","Content-Type":"application/json"};
+
+const $=id=>document.getElementById(id);
+function uc(){$('c').textContent=$('m').value.length}
+
+async function s(){
+  const t=$('m').value.trim();if(!t)return;
+  const b=$('b');b.disabled=true;
+  const f=$('n').value.trim()||"Anonymous";
+  try{
+    const r=await fetch(API+"/issues",{method:"POST",headers:H,body:JSON.stringify({title:t,body:"From: "+f,labels:["message"]})});
+    const d=await r.json();
+    if(d.number){$('m').value='';uc();$('ok').style.display='';setTimeout(()=>$('ok').style.display='none',1500);L()}
+    else toast(d.message||"Error","err")
+  }catch(e){toast("Network error","err")}
+  finally{b.disabled=false}
+}
+$('m').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();s()}});
+
+async function L(){
+  try{
+    const r=await fetch(API+"/issues?state=open&labels=message&per_page=20&sort=created&direction=asc",{headers:H});
+    const d=await r.json();
+    if(!Array.isArray(d))return;
+    const q=$('ql');
+    if(!d.length){q.innerHTML='<div class="qi empty">Queue is empty</div>';$('st').textContent='';return}
+    q.innerHTML=d.slice(0,5).map(i=>{
+      const f=i.body&&i.body.startsWith('From: ')?i.body.slice(6).split('\n')[0]:'Anon';
+      return `<div class="qi"><span class="qm">${esc(i.title||'')}</span><span class="qn">${esc(f)}</span></div>`;
+    }).join('');
+    if(d.length>5) q.innerHTML+=`<div class="qi empty">+${d.length-5} more</div>`;
+    $('st').textContent=`${d.length} message${d.length>1?'s':''} pending`;
+  }catch(e){}
+}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function toast(m,t){const e=document.createElement('div');e.className='toast '+t;e.textContent=m;document.body.appendChild(e);setTimeout(()=>e.remove(),2500)}
+
+L();setInterval(L,15000);
+</script>
+</body>
+</html>

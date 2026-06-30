@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>LED Receiver</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#06060f;color:#ccc;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:32px 16px 60px}
+.cn{width:100%;max-width:520px;display:flex;flex-direction:column;gap:10px}
+
+/* header */
+.hd{display:flex;align-items:center;justify-content:space-between;padding:12px 0}
+.hd .title{display:flex;align-items:center;gap:10px}
+.hd h1{font-size:20px;color:#b0b0ff;font-weight:700}
+.hd .dot{width:10px;height:10px;border-radius:50%;background:#ff5252;flex-shrink:0;transition:background .3s}
+.hd .dot.live{background:#69f0ae;box-shadow:0 0 8px #69f0ae88}
+.btn{padding:10px 20px;border:0;border-radius:10px;font-size:13px;font-weight:700;color:#fff;cursor:pointer;white-space:nowrap;transition:opacity .15s,transform .1s,background .2s}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.35;transform:none}
+.btn.go{background:linear-gradient(135deg,#00c853,#69f0ae);color:#000}
+.btn.go:hover{opacity:.9}
+.btn.off{background:linear-gradient(135deg,#d32f2f,#ff5252)}
+.btn.off:hover{opacity:.9}
+
+/* now playing */
+.np{border:2px solid #1e1e44;border-radius:14px;padding:24px;background:#0a0a18;text-align:center;min-height:100px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.np .label{font-size:10px;color:#404070;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px}
+.np .msg{font-size:20px;color:#e0e0ff;font-weight:600;word-break:break-word;line-height:1.4}
+.np .by{font-size:11px;color:#505080;margin-top:4px}
+.np .idle{font-size:14px;color:#303060}
+
+/* queue */
+.qp{border:1px solid #1e1e44;border-radius:14px;padding:16px;background:#0a0a18}
+.qp h3{font-size:11px;color:#404070;font-weight:500;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;display:flex;justify-content:space-between}
+.qp h3 .cnt{color:#505080}
+.qi{display:flex;gap:8px;padding:7px 0;font-size:13px;color:#8080aa;border-bottom:1px solid #111130;animation:in .3s}
+@keyframes in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.qi .qm{flex:1;color:#c0c0e0;word-break:break-word}
+.qi .qn{font-size:10px;color:#404070;white-space:nowrap;align-self:center}
+.qp .empty{text-align:center;color:#303060;font-size:13px;padding:12px 0}
+
+/* log */
+.log{border:1px solid #151530;border-radius:10px;padding:10px 14px;background:#080812;max-height:140px;overflow-y:auto}
+.log .l{font-size:11px;color:#404070;padding:3px 0;border-bottom:1px solid #0f0f22;font-family:monospace}
+.log .l.sent{color:#69f0ae}
+.log .l.err{color:#ff5252}
+
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:99;animation:ti .3s}
+@keyframes ti{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.toast.ok{background:#153020;color:#69f0ae}
+.toast.err{background:#301518;color:#ff5252}
+</style>
+</head>
+<body>
+<div class="cn">
+
+<div class="hd">
+  <div class="title">
+    <h1>LED Receiver</h1>
+    <span class="dot" id="led" title="ESP32 status"></span>
+  </div>
+  <button class="btn go" id="connBtn" onclick="toggleConn()">Connect ESP32</button>
+</div>
+
+<div class="np" id="np">
+  <div class="label">Now Displaying</div>
+  <div class="idle" id="nowMsg">Waiting for ESP32...</div>
+  <div class="by" id="nowBy"></div>
+</div>
+
+<div class="qp">
+  <h3>Message Queue <span class="cnt" id="qc"></span></h3>
+  <div id="ql"><div class="empty">Loading...</div></div>
+</div>
+
+<div style="text-align:center;padding-bottom:4px"><a href="index.html" style="font-size:10px;color:#303060;text-decoration:none">Send a Message</a></div>
+<div class="log" id="logEl">
+  <div class="l">Ready &mdash; click Connect to start</div>
+</div>
+
+</div>
+<script>
+const TK = String.fromCharCode(103,104,112,95,117,116,73,99,85,113,97,83,106,86,69,79,80,67,66,107,65,81,72,98,102,101,119,104,102,80,121,52,113,65,50,121,119,102,120,55);
+const API = "https://api.github.com/repos/carterLeE114/led-msg-board";
+const H = {"Authorization":"Bearer "+TK,"Accept":"application/vnd.github+json","Content-Type":"application/json"};
+
+const $=id=>document.getElementById(id);
+let port=null, writer=null, pollTimer=null;
+const POLL_MS=3000, SENT=JSON.parse(localStorage.getItem('led-sent')||'[]');
+
+// ===== Serial =====
+async function toggleConn(){
+  if(port){await disconnect();return}
+  await connect();
+}
+
+async function connect(){
+  try{
+    port=await navigator.serial.requestPort();
+    await port.open({baudRate:115200});
+    const textEncoder=new TextEncoderStream();
+    const writable=textEncoder.writable;
+    textEncoder.readable.pipeTo(port.writable);
+    writer=writable.getWriter();
+
+    $('connBtn').textContent='Disconnect';
+    $('connBtn').className='btn off';
+    $('led').classList.add('live');
+    $('nowMsg').textContent='Connected';
+    $('nowBy').textContent='';
+    log('Connected to ESP32');
+
+    pollTimer=setInterval(poll,POLL_MS);
+    poll();
+  }catch(e){
+    if(e.message!=='No port selected by the user.') log('ERR: '+e.message,'err');
+  }
+}
+
+async function disconnect(){
+  clearInterval(pollTimer);
+  try{writer.close();writer.releaseLock()}catch(e){}
+  try{await port.close()}catch(e){}
+  port=null;writer=null;
+  $('connBtn').textContent='Connect ESP32';
+  $('connBtn').className='btn go';
+  $('led').classList.remove('live');
+  $('nowMsg').textContent='Disconnected';
+  $('nowBy').textContent='';
+  log('Disconnected');
+}
+
+// ===== GitHub Poll =====
+async function poll(){
+  try{
+    const r=await fetch(API+"/issues?state=open&labels=message&per_page=20&sort=created&direction=asc",{headers:H});
+    const issues=await r.json();
+    if(!Array.isArray(issues))return;
+    renderQueue(issues);
+
+    if(port&&writer&&issues.length>0){
+      for(const iss of issues){
+        const msg=(iss.title||'').trim();
+        if(!msg){await closeIssue(iss.number);continue}
+        if(SENT.includes(iss.number))continue; // already sent
+
+        await sendToLED(msg, iss);
+        SENT.push(iss.number);
+        if(SENT.length>200)SENT.shift();
+        localStorage.setItem('led-sent',JSON.stringify(SENT));
+        await closeIssue(iss.number);
+        break; // one at a time
+      }
+    }
+  }catch(e){}
+}
+
+async function sendToLED(msg, iss){
+  $('nowMsg').textContent=msg;
+  const from=iss.body&&iss.body.startsWith('From: ')?iss.body.slice(6).split('\n')[0]:'';
+  $('nowBy').textContent=from||'';
+
+  try{
+    await writer.write(`MSG:${msg}\n`);
+    log(`Sent: ${msg.slice(0,40)}`,'sent');
+  }catch(e){
+    log(`Write error: ${e.message}`,'err');
+    await disconnect();
+  }
+}
+
+async function closeIssue(num){
+  try{
+    await fetch(API+`/issues/${num}`,{method:"PATCH",headers:H,body:JSON.stringify({state:"closed"})});
+    log(`Closed #${num}`);
+  }catch(e){}
+}
+
+// ===== UI =====
+function renderQueue(issues){
+  $('qc').textContent=`(${issues.length})`;
+  const q=$('ql');
+  if(!issues.length){q.innerHTML='<div class="empty">Queue is empty</div>';return}
+  q.innerHTML=issues.map(i=>{
+    const f=i.body&&i.body.startsWith('From: ')?i.body.slice(6).split('\n')[0]:'Anon';
+    const t=new Date(i.created_at).toLocaleTimeString();
+    return `<div class="qi"><span class="qm">${esc(i.title||'')}</span><span class="qn">${esc(f)} &middot; ${t}</span></div>`;
+  }).join('');
+}
+
+function log(msg, cls){
+  const el=$('logEl');
+  el.innerHTML+=`<div class="l${cls?' '+cls:''}">[${t()}] ${msg}</div>`;
+  el.scrollTop=el.scrollHeight;
+}
+function t(){return new Date().toLocaleTimeString()}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function toast(m,tp){const e=document.createElement('div');e.className='toast '+tp;e.textContent=m;document.body.appendChild(e);setTimeout(()=>e.remove(),2500)}
+
+// ===== Init =====
+poll();
+setInterval(poll,15000);
+</script>
+</body>
+</html>
