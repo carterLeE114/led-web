@@ -89,6 +89,7 @@ const $=id=>document.getElementById(id);
 let port=null, writer=null, pollTimer=null, readCancel=null;
 const POLL_MS=3000, SENT=JSON.parse(localStorage.getItem('led-sent')||'[]');
 const hasSerial = typeof navigator !== 'undefined' && !!navigator.serial;
+const encoder = new TextEncoder();
 
 // ===== Serial =====
 async function toggleConn(){
@@ -106,13 +107,12 @@ async function connect(){
     $('nowMsg').textContent='ESP32 booting...';
     $('nowBy').textContent='Please wait 3 seconds';
     await new Promise(r=>setTimeout(r,3000));
-    log('ESP32 boot complete');
+    log('Boot wait done');
 
-    const textEncoder=new TextEncoderStream();
-    textEncoder.readable.pipeTo(port.writable);
-    writer=textEncoder.writable.getWriter();
+    // Direct writer (no TextEncoderStream pipeTo issues)
+    writer=port.writable.getWriter();
 
-    // Read ESP32 serial output (debug logs)
+    // Read ESP32 serial output
     startReading();
 
     $('connBtn').textContent='Disconnect';
@@ -173,25 +173,27 @@ async function startReading(){
 async function poll(){
   try{
     const r=await fetch(API+"/issues?state=open&labels=message&per_page=20&sort=created&direction=asc",{headers:H});
+    if(!r.ok){log('API error: '+r.status,'err');return}
     const issues=await r.json();
     if(!Array.isArray(issues))return;
     renderQueue(issues);
 
     if(port&&writer&&issues.length>0){
+      log(`Found ${issues.length} message(s) in queue`);
       for(const iss of issues){
         const msg=(iss.title||'').trim();
         if(!msg){await closeIssue(iss.number);continue}
-        if(SENT.includes(iss.number))continue; // already sent
+        if(SENT.includes(iss.number))continue;
 
         await sendToLED(msg, iss);
         SENT.push(iss.number);
         if(SENT.length>200)SENT.shift();
         localStorage.setItem('led-sent',JSON.stringify(SENT));
         await closeIssue(iss.number);
-        break; // one at a time
+        break;
       }
     }
-  }catch(e){}
+  }catch(e){log('Poll error: '+e.message,'err');}
 }
 
 async function sendToLED(msg, iss){
@@ -200,7 +202,8 @@ async function sendToLED(msg, iss){
   $('nowBy').textContent=from||'';
 
   try{
-    await writer.write(`MSG:${msg}\n`);
+    const data = encoder.encode(`MSG:${msg}\n`);
+    await writer.write(data);
     log(`Sent: ${msg.slice(0,40)}`,'sent');
   }catch(e){
     log(`Write error: ${e.message}`,'err');
@@ -211,8 +214,8 @@ async function sendToLED(msg, iss){
 async function closeIssue(num){
   try{
     await fetch(API+`/issues/${num}`,{method:"PATCH",headers:H,body:JSON.stringify({state:"closed"})});
-    log(`Closed #${num}`);
-  }catch(e){}
+    log(`Closed #${num}`, 'sent');
+  }catch(e){log('Close error: '+e.message,'err');}
 }
 
 // ===== UI =====
