@@ -101,7 +101,9 @@ async function toggleConn(){
 async function connect(){
   try{
     port=await navigator.serial.requestPort();
-    await port.open({baudRate:115200});
+    await port.open({baudRate:115200,dataBits:8,stopBits:1,parity:"none",flowControl:"none"});
+    // ESP32-S3: prevent DTR from triggering download mode
+    try{await port.setSignals({dataTerminalReady:false,requestToSend:false})}catch(e){}
 
     // ESP32 will reset on DTR — wait for boot
     $('nowMsg').textContent='ESP32 booting...';
@@ -202,8 +204,10 @@ async function sendToLED(msg, iss){
   $('nowBy').textContent=from||'';
 
   try{
+    await writer.ready;
     const data = encoder.encode(`MSG:${msg}\n`);
     await writer.write(data);
+    await writer.ready;
     log(`Sent: ${msg.slice(0,40)}`,'sent');
   }catch(e){
     log(`Write error: ${e.message}`,'err');
