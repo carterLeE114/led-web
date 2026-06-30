@@ -88,9 +88,11 @@ const H = {"Authorization":"Bearer "+TK,"Accept":"application/vnd.github+json","
 const $=id=>document.getElementById(id);
 let port=null, writer=null, pollTimer=null;
 const POLL_MS=3000, SENT=JSON.parse(localStorage.getItem('led-sent')||'[]');
+const hasSerial = typeof navigator !== 'undefined' && !!navigator.serial;
 
 // ===== Serial =====
 async function toggleConn(){
+  if(!hasSerial){log('Web Serial not supported. Use Chrome or Edge desktop.','err');return}
   if(port){await disconnect();return}
   await connect();
 }
@@ -199,6 +201,14 @@ function esc(s){const d=document.createElement('div');d.textContent=s;return d.i
 function toast(m,tp){const e=document.createElement('div');e.className='toast '+tp;e.textContent=m;document.body.appendChild(e);setTimeout(()=>e.remove(),2500)}
 
 // ===== Init =====
+if(!hasSerial){
+  $('connBtn').textContent='Chrome/Edge Only';
+  $('connBtn').disabled=true;
+  $('connBtn').style.opacity='0.4';
+  $('nowMsg').textContent='Open in Chrome or Edge desktop';
+  $('nowBy').textContent='Web Serial API required';
+  log('Browser not supported — use Chrome or Edge','err');
+}
 poll();
 setInterval(poll,15000);
 </script>
